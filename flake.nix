@@ -14,18 +14,18 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = import nixpkgs { inherit system; };
+    let
+      systems = flake-utils.lib.defaultSystems;
 
-        packageDir = builtins.attrNames (builtins.readDir ./derivations);
+      packages = nixpkgs.lib.genAttrs systems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          packageDirs = builtins.attrNames (builtins.readDir ./derivations);
+          pkgsFromDirs = builtins.listToAttrs (map (name: {
+            inherit name;
+            value = pkgs.callPackage (./derivations + "/${name}") { };
+          }) packageDirs);
+        in pkgsFromDirs // { });
 
-        packages = builtins.listToAttrs (map (name: {
-          inherit name;
-          value = pkgs.callPackage (./derivations + "/${name}") { };
-        }) packageDir);
-      in { packages = packages // {
-        default = packages.LokiWallpaper;
-      }; });
-
+    in { inherit packages; };
 }
