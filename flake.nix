@@ -2,7 +2,7 @@
   description = "A very basic flake";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -14,18 +14,19 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, ... }:
-    let
-      systems = flake-utils.lib.defaultSystems;
-
-      packages = nixpkgs.lib.genAttrs systems (system:
-        let
-          pkgs = import nixpkgs { inherit system; };
-          packageDirs = builtins.attrNames (builtins.readDir ./derivations);
-          pkgsFromDirs = builtins.listToAttrs (map (name: {
-            inherit name;
-            value = pkgs.callPackage (./derivations + "/${name}") { };
-          }) packageDirs);
-        in pkgsFromDirs // { });
-
-    in { inherit packages; };
+    flake-utils.lib.eachSystem [
+      "x86_64-linux"
+      "aarch64-linux"
+      "x86_64-darwin"
+      "aarch64-darwin"
+    ] (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+        packageDirs = builtins.attrNames (builtins.readDir ./derivations);
+      in {
+        packages = builtins.listToAttrs (map (name: {
+          inherit name;
+          value = pkgs.callPackage (./derivations + "/${name}") { };
+        }) packageDirs);
+      });
 }
