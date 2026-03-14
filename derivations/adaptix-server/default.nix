@@ -1,4 +1,4 @@
-{ lib, pkgs, buildGoModule, fetchFromGitHub, go_1_25 }:
+{ lib, pkgs, buildGoModule, fetchFromGitHub, go_1_25, ... }:
 
 (buildGoModule.override { go = go_1_25; }) rec {
   name = "AdaptixServer";

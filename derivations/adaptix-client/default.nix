@@ -1,4 +1,4 @@
-{ stdenv, lib, pkgs, fetchFromGitHub, cmake, qt6  }:
+{ stdenv, lib, pkgs, fetchFromGitHub, cmake, qt6, ... }:
 
 stdenv.mkDerivation rec {
   name = "AdaptixClient";

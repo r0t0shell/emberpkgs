@@ -1,7 +1,7 @@
-{ stdenv, lib }:
+{ stdenv, lib, ... }:
 
 stdenv.mkDerivation rec {
-  name = "loki-wallpaper";
+  name = "athena-art";
   version = "1.0";
 
   src = ./.;
@@ -14,7 +14,7 @@ stdenv.mkDerivation rec {
   buildPhase = "true";
 
   meta = with lib; {
-    description = "LokiOS wallpaper collection";
+    description = "Athena system art collection";
     license = lib.licenses.free;
   };
 }
