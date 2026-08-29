@@ -1,0 +1,141 @@
+diff --git a/client/rest/http.go b/client/rest/http.go
+index 52e8aba..fca9e03 100644
+--- a/client/rest/http.go
++++ b/client/rest/http.go
+@@ -27,12 +27,50 @@ import (
+ 	"net/http/cookiejar"
+ 	"net/url"
+ 	"strings"
++	"sync"
+ 	"time"
+ 
+ 	"github.com/bloodhoundad/azurehound/v2/config"
+ 	"github.com/bloodhoundad/azurehound/v2/constants"
++	"golang.org/x/time/rate"
+ )
+ 
++// rateLimiterOnce ensures the process-wide HTTP rate limiter is only initialized once
++// so that throttling applies globally across every rest client.
++var (
++	rateLimiterOnce sync.Once
++	httpRateLimiter *rate.Limiter
++)
++
++func getHTTPRateLimiter() *rate.Limiter {
++	rateLimiterOnce.Do(func() {
++		if v := config.ColRateLimit.Value(); v != nil {
++			if rps, ok := v.(int); ok && rps > 0 {
++				httpRateLimiter = rate.NewLimiter(rate.Limit(rps), rps)
++			}
++		}
++	})
++	return httpRateLimiter
++}
++
++// rateLimitedTransport wraps an http.RoundTripper and blocks until the shared
++// rate limiter allows the request to proceed.
++type rateLimitedTransport struct {
++	base    http.RoundTripper
++	limiter *rate.Limiter
++}
++
++func (t *rateLimitedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
++	ctx := req.Context()
++	if ctx == nil {
++		ctx = context.Background()
++	}
++	if err := t.limiter.Wait(ctx); err != nil {
++		return nil, err
++	}
++	return t.base.RoundTrip(req)
++}
++
+ func NewHTTPClient(proxyUrl string) (*http.Client, error) {
+ 	transport := http.DefaultTransport.(*http.Transport).Clone()
+ 	transport.MaxConnsPerHost = config.ColMaxConnsPerHost.Value().(int)
+@@ -62,9 +100,14 @@ func NewHTTPClient(proxyUrl string) (*http.Client, error) {
+ 		}
+ 	}
+ 
++	var roundTripper http.RoundTripper = transport
++	if limiter := getHTTPRateLimiter(); limiter != nil {
++		roundTripper = &rateLimitedTransport{base: transport, limiter: limiter}
++	}
++
+ 	return &http.Client{
+ 		Jar:       jar,
+-		Transport: transport,
++		Transport: roundTripper,
+ 	}, nil
+ }
+ 
+
+diff --git a/config/utils.go b/config/utils.go
+index a7c36a1..a518731 100644
+--- a/config/utils.go
++++ b/config/utils.go
+@@ -55,6 +55,7 @@ func CheckCollectionConfigSanity(log logr.Logger) {
+ 	useSaneIntValues(ColMaxConnsPerHost, log)
+ 	useSaneIntValues(ColMaxIdleConnsPerHost, log)
+ 	useSaneIntValues(ColStreamCount, log)
++	useSaneIntValues(ColRateLimit, log)
+ }
+ 
+ func useSaneIntValues(c config.Config, log logr.Logger) {
+
+diff --git a/config/config.go b/config/config.go
+index eeedfaf..3dd14d4 100644
+--- a/config/config.go
++++ b/config/config.go
+@@ -337,6 +337,17 @@ var (
+ 		MaxValue:   50,
+ 	}
+ 
++	ColRateLimit = Config{
++		Name:       "rateLimit",
++		Shorthand:  "",
++		Usage:      "The maximum number of HTTP requests per second issued during collection (0 to disable throttling).",
++		Persistent: true,
++		Required:   false,
++		Default:    0,
++		MinValue:   0,
++		MaxValue:   10_000,
++	}
++
+ 	// Command specific configurations
+ 	KeyVaultAccessTypes = Config{
+ 		Name:       "access-types",
+@@ -405,6 +416,7 @@ var (
+ 		ColMaxConnsPerHost,
+ 		ColMaxIdleConnsPerHost,
+ 		ColStreamCount,
++		ColRateLimit,
+ 	}
+ )
+ 
+diff --git a/go.mod b/go.mod
+index c7b3387..0f99343 100644
+--- a/go.mod
++++ b/go.mod
+@@ -51,6 +51,7 @@ require (
+ 	golang.org/x/crypto v0.48.0 // indirect
+ 	golang.org/x/image v0.39.0 // indirect
+ 	golang.org/x/text v0.36.0 // indirect
++	golang.org/x/time v0.15.0 // indirect
+ 	gopkg.in/yaml.v3 v3.0.1 // indirect
+ )
+ 
+
+diff --git a/go.sum b/go.sum
+index 3471745..1d8839e 100644
+--- a/go.sum
++++ b/go.sum
+@@ -133,6 +133,8 @@ golang.org/x/sys v0.41.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+ golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
+ golang.org/x/text v0.36.0 h1:JfKh3XmcRPqZPKevfXVpI1wXPTqbkE5f7JA92a55Yxg=
+ golang.org/x/text v0.36.0/go.mod h1:NIdBknypM8iqVmPiuco0Dh6P5Jcdk8lJL0CUebqK164=
++golang.org/x/time v0.15.0 h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U=
++golang.org/x/time v0.15.0/go.mod h1:Y4YMaQmXwGQZoFaVFk4YpCt4FLQMYKZe9oeV/f4MSno=
+ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+ gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
+ gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
